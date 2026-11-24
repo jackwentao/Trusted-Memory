@@ -1,0 +1,10 @@
+{
+  "split": "dev",
+  "scenarios": 60,
+  "seed": 20261125,
+  "top_k": 5,
+  "reader_and_judge": "deepseek/deepseek-v4.1-flash",
+  "temperature": 0,
+  "embedding": "BAAI/bge-m3",
+  "manifest_sha256": "717db161f3da9b9a2569200ae390a0250ac30eb161415f44d98ba9ebce610db1"
+}
