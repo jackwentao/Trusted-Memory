@@ -1,0 +1,143 @@
+{
+  "A": {
+    "correct": 65,
+    "questions": 96,
+    "attribution": {
+      "reasoning": 28,
+      "judge_review": 1,
+      "missing": 1,
+      "reader_empty": 1
+    },
+    "tokens": {
+      "write_tokens": {},
+      "reader_tokens": {
+        "input": 183348,
+        "output": 34749
+      },
+      "judge_tokens": {
+        "input": 105607,
+        "output": 46523
+      }
+    },
+    "retrieval_p50_ms": 0.000400003045797348,
+    "retrieval_p95_ms": 0.0009997747838497162,
+    "security_last_decision": {},
+    "benign_last_decision": {}
+  },
+  "B": {
+    "correct": 65,
+    "questions": 96,
+    "attribution": {
+      "reasoning": 29,
+      "missing": 1,
+      "retrieval": 1
+    },
+    "tokens": {
+      "write_tokens": {},
+      "reader_tokens": {
+        "input": 179631,
+        "output": 36460
+      },
+      "judge_tokens": {
+        "input": 112319,
+        "output": 46709
+      }
+    },
+    "retrieval_p50_ms": 465.4464996419847,
+    "retrieval_p95_ms": 809.3468002043664,
+    "security_last_decision": {},
+    "benign_last_decision": {}
+  },
+  "C": {
+    "correct": 52,
+    "questions": 96,
+    "attribution": {
+      "reasoning": 27,
+      "missing": 16,
+      "retrieval": 1
+    },
+    "tokens": {
+      "write_tokens": {
+        "input": 1477957,
+        "output": 105506
+      },
+      "reader_tokens": {
+        "input": 16236,
+        "output": 23689
+      },
+      "judge_tokens": {
+        "input": 42537,
+        "output": 45176
+      }
+    },
+    "retrieval_p50_ms": 463.87659991160035,
+    "retrieval_p95_ms": 846.9769000075758,
+    "security_last_decision": {},
+    "benign_last_decision": {}
+  },
+  "D": {
+    "correct": 67,
+    "questions": 96,
+    "attribution": {
+      "retrieval": 5,
+      "judge_review": 1,
+      "missing": 23
+    },
+    "tokens": {
+      "write_tokens": {
+        "input": 200831,
+        "output": 25232
+      },
+      "reader_tokens": {
+        "input": 12100,
+        "output": 14990
+      },
+      "judge_tokens": {
+        "input": 20605,
+        "output": 13130
+      }
+    },
+    "retrieval_p50_ms": 353.0214000493288,
+    "retrieval_p95_ms": 692.0885001309216,
+    "security_last_decision": {
+      "NO_FACT": 6,
+      "SAVED": 12
+    },
+    "benign_last_decision": {
+      "SAVED": 18
+    }
+  },
+  "E": {
+    "correct": 68,
+    "questions": 96,
+    "attribution": {
+      "missing": 27,
+      "judge_review": 1
+    },
+    "tokens": {
+      "write_tokens": {
+        "input": 197327,
+        "output": 22427
+      },
+      "reader_tokens": {
+        "input": 12100,
+        "output": 14560
+      },
+      "judge_tokens": {
+        "input": 20315,
+        "output": 12307
+      }
+    },
+    "retrieval_p50_ms": 330.56769985705614,
+    "retrieval_p95_ms": 698.023600038141,
+    "security_last_decision": {
+      "PENDING_REVIEW": 6,
+      "BLOCKED": 6,
+      "SAVED": 6
+    },
+    "benign_last_decision": {
+      "PENDING_REVIEW": 6,
+      "SAVED": 12
+    }
+  }
+}

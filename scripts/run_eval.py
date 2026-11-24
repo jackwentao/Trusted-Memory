@@ -222,7 +222,9 @@ class Runtime:
                 if not isinstance(correct, bool):
                     raise TypeError("invalid judge label")
                 attribution = None
-                if not correct:
+                if not correct and not answer.strip():
+                    attribution = "reader_empty"
+                elif not correct:
                     label = json.loads(
                         chat(
                             self.llm,

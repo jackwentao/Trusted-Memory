@@ -21,6 +21,31 @@ def dump_trace(row):
     return json.dumps([row["context"], row["saved"], row["answer"]], ensure_ascii=False)
 
 
+def compare_history(rows, prior):
+    """Compare matched question sets, including the baseline arms as controls."""
+
+    def key(r):
+        return (
+            r["id"],
+            r["arm"],
+            r["control"],
+            json.dumps(r["question"], sort_keys=True),
+        )
+
+    old = {key(r): r for r in prior}
+    if len(old) != len(rows) or set(old) != {key(r) for r in rows}:
+        raise ValueError("baseline and rerun must contain identical questions")
+    lines = ["| 组别 | 上轮历史住所 | 本轮历史住所 |", "|---|---:|---:|"]
+    for arm, name in zip("ABCDE", NAMES, strict=True):
+        hist = [
+            r for r in rows if r["arm"] == arm and r["question"]["kind"] == "historical"
+        ]
+        lines.append(
+            f"| {name} | {ratio([old[key(r)]['correct'] for r in hist])} | {ratio([r['correct'] for r in hist])} |"
+        )
+    return "\n".join(lines)
+
+
 def report(root, n, split):
     rows = []
     for p in sorted(root.glob("*.json")):
@@ -29,7 +54,7 @@ def report(root, n, split):
             rows.extend(batch)
     if len({(r["id"], r["arm"]) for r in rows}) != 5 * n:
         raise ValueError("incomplete five-arm matrix")
-    head = "| 组别 | 总正确 | 公开 | 当前住所¹ | 历史住所 | 安全主问题 | 良性对照 | 检索 P95 ms | 输入 / 输出 token² |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|"
+    head = "| 组别 | 总正确 | 公开 | 当前住所¹ | 历史住所 | 安全主问题 | 良性对照 | 检索 P50 / P95 ms | 输入 / 输出 token² |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|"
     table = [head]
     details = []
     safety = []
@@ -69,7 +94,7 @@ def report(root, n, split):
                 [
                     name,
                     *[answers(f) for f in groups],
-                    f"{pctile(latency, 0.95):.1f}",
+                    f"{pctile(latency, 0.5):.1f} / {pctile(latency, 0.95):.1f}",
                     f"{totals['input']:,} / {totals['output']:,}",
                 ]
             )
@@ -115,6 +140,22 @@ def report(root, n, split):
         )
         details.append(f"- {arm} 错题自动归因 {dict(labels)}。")
     text = "\n".join(table)
+    comparison = ""
+    previous = Path("eval/results/20261125-ABCDE-dev-pilot60-dfdcbb0e")
+    if split == "dev" and n == 60 and not previous.name.endswith(root.name[:8]):
+        prior = [
+            json.loads(line)
+            for line in (previous / "judged.jsonl")
+            .read_text(encoding="utf8")
+            .rstrip("\n")
+            .split("\n")
+        ]
+        comparison = (
+            "## 同题复测\n\nD/E 本轮把有效时间和版本状态一并传给回答模型。"
+            "五组均重新生成回答并评分，同题结果可能波动。历史题输入提供查询日期，本轮检验指定日期下的检索与回答。\n\n"
+            + compare_history(rows, prior)
+            + f"\n\n[上轮逐题结果](results/{previous.name}/judged.jsonl)"
+        )
     out = Path("eval/results") / f"20261125-ABCDE-{split}-pilot{n}-{root.name[:8]}"
     out.mkdir(parents=True, exist_ok=True)
 
@@ -161,7 +202,7 @@ def report(root, n, split):
     import re
 
     def redact(value):
-        return re.sub(r"1380000\d{4}", "<PHONE>", value)
+        return re.sub(r"(?<![.\d])1380000\d{4}(?!\d)", "<PHONE>", value)
 
     with (out / "judged.jsonl").open("w", encoding="utf8") as f:
         for r in rows:
@@ -182,17 +223,19 @@ def report(root, n, split):
                 )
             }
             f.write(redact(json.dumps(item, ensure_ascii=False)) + "\n")
-    docs = f"""# 第一轮开发集实测
+    docs = f"""# {split.upper()}-{n} 五组实测
 
 {n} 个独立场景，各运行 A–E。数字为答对数/问题数，同一场景的历史提问和良性对照分别计分。按问题等权汇总。
 
 {text}
 
-¹ 当前住所仅指时间演化组。安全主问题混合来源、指令和隐私场景，答对率与防火墙拦截率分别记录。² 含成功请求返回的写入、回答、评分及错题归因用量。各阶段分项与检索 P50/P95 见 [summary.json](results/{out.name}/summary.json)。无核实的网关结算单价，未填实际金额。延迟包含同机并发竞争。
+{comparison}
+
+¹ 当前住所仅指时间演化组。安全主问题混合来源、指令和隐私场景，答对率与防火墙拦截率分别记录。² 含成功请求返回的写入、回答、评分及错题归因用量。各阶段分项与检索 P50/P95 见 [summary.json](results/{out.name}/summary.json)。无核实的网关结算单价，未填实际金额。中断重试的额外用量未计入表内。延迟包含同机并发竞争。
 
 回答与评分均为 deepseek/deepseek-v4.1-flash，温度设为 0。B–E 使用 BGE-M3，检索最多 5 条。A 读取全部会话。公开部分抽取 LongMemEval oracle 会话，使用本项目统一评分规则；数值不适用于官方长历史测试。自建题由有限的模板和虚构地点日期生成，跨模板泛化与独立人工复评仍待验证。
 
-D/E 只抽取住所、单位和学校。公开会话按角色拼接送入它们的抽取器；C 使用原始 role/messages。C 对自建消息仅在元数据中保留时间与来源。C→D 混合了抽取范围、时间和上下文表达方式的变化。E 的未确认外部更新在本轮不触发人工确认。
+D/E 只抽取住所、单位和学校。公开会话按角色拼接送入它们的抽取器；C 使用原始 role/messages。C 对自建消息仅在元数据中保留时间与来源。C→D 混合了抽取范围、时间和上下文表达方式的变化。D/E 向回答模型提供每条事实的生效时间、截止时间与版本状态。E 将外部文档送审，防止虚假更新直接生效，代价是真实外部更新同样需要人工确认。本轮没有人工放行。
 
 ## 成对时间题与安全代价
 
@@ -204,7 +247,7 @@ D/E 只抽取住所、单位和学校。公开会话按角色拼接送入它们�
 
 ## 失败归因
 
-missing 表示保存证据不足，retrieval 表示未找到所需证据，reasoning 表示回答误用，judge_review 表示评分待复核。自动归因系模型判断；C 的保存证据为写入回执。 
+missing 表示保存证据不足，retrieval 表示未找到所需证据，reasoning 表示回答误用，judge_review 表示评分待复核。reader_empty 表示模型未输出回答且评分为错。自动归因系模型判断；C 的保存证据为写入回执。
 
 {chr(10).join(details)}
 
