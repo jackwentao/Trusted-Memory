@@ -193,7 +193,7 @@ class Runtime:
                         else None
                     )
                     ctx = [
-                        v.fact.text
+                        v.reader_context()
                         for v in self.g[arm].recall(
                             q["text"], owner=owner, as_of=instant, k=5
                         )

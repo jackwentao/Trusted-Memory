@@ -70,3 +70,17 @@ def test_conflicting_replays_preserve_history(tmp_path):
     with pytest.raises(ValueError):
         store.write(replace(original, event_time=datetime(2020, 1, 1)))
     assert store.lookup("user", "city").fact == original
+
+
+def test_reader_sees_sqlite_validity_after_late_arrival(tmp_path):
+    store = DualTimestampStore(tmp_path / "m.db", lambda _: None)
+    store.write(city(3, "上海"))
+    store.write(city(1, "烟台"))
+    assert store.lookup("user", "city", at(2)).reader_context() == (
+        "[event_time=2020-01-01T00:00:00+00:00（含） | "
+        "valid_until=2020-03-01T00:00:00+00:00（不含） | SUPERSEDED 历史记录] 烟台"
+    )
+    assert store.lookup("user", "city").reader_context() == (
+        "[event_time=2020-03-01T00:00:00+00:00（含） | "
+        "valid_until=无截止 | ACTIVE 现行记录] 上海"
+    )

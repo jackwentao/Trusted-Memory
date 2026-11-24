@@ -136,6 +136,15 @@ class Version:
     superseded_by: UUID | None
     state: State
 
+    def reader_context(self) -> str:
+        """Render the reconciled half-open interval alongside the retrieved fact."""
+        end = self.valid_to.isoformat() + "（不含）" if self.valid_to else "无截止"
+        label = {State.ACTIVE: "现行记录", State.SUPERSEDED: "历史记录"}[self.state]
+        return (
+            f"[event_time={self.fact.event_time.isoformat()}（含） | "
+            f"valid_until={end} | {self.state.value} {label}] {self.fact.text}"
+        )
+
     def to_mem0_payload(self) -> dict[str, Any]:
         """Export the effective chain after local version reconciliation."""
         payload = self.fact.to_mem0_payload()
