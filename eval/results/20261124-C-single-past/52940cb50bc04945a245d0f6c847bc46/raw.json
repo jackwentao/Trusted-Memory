@@ -1,0 +1,15 @@
+{
+  "input": "我以前住在上海。",
+  "response": [
+    "{\"memory\": [{\"id\": \"0\", \"text\": \"User previously lived in Shanghai but no longer lives there (as of November 2026)\", \"attributed_to\": \"user\"}]}"
+  ],
+  "saved": {
+    "results": [
+      {
+        "id": "c986ac6e-e984-492a-a4fa-20090d759585",
+        "memory": "User previously lived in Shanghai but no longer lives there (as of November 2026)",
+        "event": "ADD"
+      }
+    ]
+  }
+}

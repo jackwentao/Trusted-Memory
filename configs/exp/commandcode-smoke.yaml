@@ -1,0 +1,23 @@
+{
+  "llm": {
+    "provider": "openai",
+    "config": {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "openai_base_url": "https://api.commandcode.ai/provider/v1"
+    }
+  },
+  "embedder": {
+    "provider": "huggingface",
+    "config": {
+      "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    }
+  },
+  "vector_store": {
+    "provider": "qdrant",
+    "config": {
+      "path": "data/qdrant-smoke-local",
+      "collection_name": "mem0_smoke_local",
+      "embedding_model_dims": 384
+    }
+  }
+}

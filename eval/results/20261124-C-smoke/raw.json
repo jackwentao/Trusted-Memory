@@ -1,0 +1,21 @@
+{
+  "added": {
+    "results": []
+  },
+  "found": {
+    "results": [
+      {
+        "id": "6e8959b2-1605-4394-b351-e732fe00c0b8",
+        "memory": "用户居住在上海",
+        "hash": "aa6d04fba2f8712cec47494c4d8f036b",
+        "metadata": null,
+        "score": 0.14494854430483156,
+        "created_at": "2026-11-24T08:38:12.316924+00:00",
+        "updated_at": "2026-11-24T08:38:12.316924+00:00",
+        "user_id": "smoke-user",
+        "run_id": "smoke-run",
+        "attributed_to": "user"
+      }
+    ]
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "config": {
+    "llm": {
+      "provider": "openai",
+      "config": {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "openai_base_url": "https://api.commandcode.ai/provider/v1"
+      }
+    },
+    "embedder": {
+      "provider": "huggingface",
+      "config": {
+        "model": "BAAI/bge-m3"
+      }
+    },
+    "vector_store": {
+      "provider": "qdrant",
+      "config": {
+        "path": "data/qdrant-bge-m3",
+        "collection_name": "bge_m3",
+        "embedding_model_dims": 1024,
+        "on_disk": true
+      }
+    },
+    "history_db_path": "data/bge-m3-history.sqlite"
+  },
+  "added": {
+    "results": [
+      {
+        "id": "c760e6fc-ac55-4f1d-870f-c7d59a92fdfa",
+        "memory": "用户住在上海。",
+        "event": "ADD"
+      },
+      {
+        "id": "bf483c54-3cc7-4945-9121-d03052638e4c",
+        "memory": "用户喜欢面食。",
+        "event": "ADD"
+      }
+    ]
+  },
+  "found": {
+    "results": [
+      {
+        "id": "c760e6fc-ac55-4f1d-870f-c7d59a92fdfa",
+        "memory": "用户住在上海。",
+        "hash": "b00515fd5e511716aa45bf53b6ff7452",
+        "metadata": null,
+        "score": 0.7250043123396908,
+        "created_at": "2026-11-24T10:26:56.167924+00:00",
+        "updated_at": "2026-11-24T10:26:56.167924+00:00",
+        "user_id": "smoke-user",
+        "run_id": "b5eae0b578784f108a4b0fa84ac2d030",
+        "attributed_to": "user"
+      },
+      {
+        "id": "bf483c54-3cc7-4945-9121-d03052638e4c",
+        "memory": "用户喜欢面食。",
+        "hash": "70dee1d59cffb23be5259f6c1c17b9d5",
+        "metadata": null,
+        "score": 0.5016918306601044,
+        "created_at": "2026-11-24T10:26:56.167924+00:00",
+        "updated_at": "2026-11-24T10:26:56.167924+00:00",
+        "user_id": "smoke-user",
+        "run_id": "b5eae0b578784f108a4b0fa84ac2d030",
+        "attributed_to": "user"
+      }
+    ]
+  }
+}

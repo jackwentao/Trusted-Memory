@@ -1,0 +1,25 @@
+{
+  "llm": {
+    "provider": "openai",
+    "config": {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "openai_base_url": "https://api.commandcode.ai/provider/v1"
+    }
+  },
+  "embedder": {
+    "provider": "huggingface",
+    "config": {
+      "model": "BAAI/bge-m3"
+    }
+  },
+  "vector_store": {
+    "provider": "qdrant",
+    "config": {
+      "path": "data/qdrant-bge-m3",
+      "collection_name": "bge_m3",
+      "embedding_model_dims": 1024,
+      "on_disk": true
+    }
+  },
+  "history_db_path": "data/bge-m3-history.sqlite"
+}
