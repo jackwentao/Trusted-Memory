@@ -3,6 +3,7 @@
 ## Phase 1 · 安全与时间规则
 - [x] 实现共用数据类型、写前脱敏与来源审查、指令过滤和脱敏审计。证据见 tests/unit/test_security_middleware.py。
 - [x] 实现双时间存储、有效区间与版本链，覆盖乱序、重复写入及失败恢复。证据见 tests/unit/test_dual_timestamp_store.py。
+- [x] Mem0 原生字段及治理元数据经 SQLite 重开后可导回，见 tests/unit/test_mem0_payload.py。
 - 验收命令见 Makefile 的 lint 和 test。
 
 ## Phase 2 · 对接 Mem0

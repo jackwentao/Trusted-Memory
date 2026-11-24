@@ -1,5 +1,6 @@
 """SQLite owns visibility. The vector sink must upsert by stable fact ID."""
 
+import json
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
@@ -37,6 +38,12 @@ class DualTimestampStore:
                     WINDOW timeline AS (PARTITION BY owner,attribute ORDER BY event);
             """)
 
+            # Additive migration preserves existing facts and interrupted writes.
+            db.execute("BEGIN IMMEDIATE")
+            if "native" not in {r[1] for r in db.execute("PRAGMA table_info(facts)")}:
+                db.execute("ALTER TABLE facts ADD COLUMN native TEXT")
+            db.commit()
+
     def write(self, fact: Fact) -> None:
         """Persist intent, then publish. Retrying the same fact resumes after failure."""
         key = str(fact.id)
@@ -46,15 +53,18 @@ class DualTimestampStore:
             fact.text,
             Source(fact.source).value,
             _stamp(fact.event_time),
+            json.dumps(fact.native, sort_keys=True, allow_nan=False)
+            if fact.native is not None
+            else None,
         )
         with closing(sqlite3.connect(self.path)) as db:
             with db:
                 db.execute(
-                    "INSERT INTO facts(id,owner,attribute,text,source,event,ingest) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+                    "INSERT INTO facts(id,owner,attribute,text,source,event,native,ingest) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
                     (key, *values, _stamp(datetime.now(UTC))),
                 )
                 current = db.execute(
-                    "SELECT owner,attribute,text,source,event,ready FROM facts WHERE id=?",
+                    "SELECT owner,attribute,text,source,event,native,ready FROM facts WHERE id=?",
                     (key,),
                 ).fetchone()
                 if current[:-1] != values:
@@ -69,9 +79,17 @@ class DualTimestampStore:
         """Return durable retry inputs after restart."""
         with closing(sqlite3.connect(self.path)) as db:
             return [
-                Fact(UUID(i), o, a, t, Source(s), datetime.fromisoformat(e))
-                for i, o, a, t, s, e in db.execute(
-                    "SELECT id,owner,attribute,text,source,event FROM facts WHERE ready=0"
+                Fact(
+                    UUID(i),
+                    o,
+                    a,
+                    t,
+                    Source(s),
+                    datetime.fromisoformat(e),
+                    json.loads(native) if native else None,
+                )
+                for i, o, a, t, s, e, native in db.execute(
+                    "SELECT id,owner,attribute,text,source,event,native FROM facts WHERE ready=0"
                 )
             ]
 
@@ -82,18 +100,42 @@ class DualTimestampStore:
         now = _stamp(as_of or datetime.now(UTC))
         with closing(sqlite3.connect(self.path)) as db:
             row = db.execute(
-                "SELECT id,text,source,event,ingest,valid_to,successor FROM chain WHERE owner=? AND attribute=? AND event<=? AND (valid_to IS NULL OR valid_to>?)",
+                "SELECT id,text,source,event,ingest,valid_to,successor,native FROM chain WHERE owner=? AND attribute=? AND event<=? AND (valid_to IS NULL OR valid_to>?)",
                 (owner, attribute, now, now),
             ).fetchone()
         if row is None:
             return None
-        i, t, s, e, ingest, end, nxt = row
+        i, t, s, e, ingest, end, nxt, native = row
         end_time = datetime.fromisoformat(end) if end else None
-        active = datetime.fromisoformat(e) <= datetime.now(UTC) and (
-            not end_time or datetime.now(UTC) < end_time
+        meta = (json.loads(native).get("metadata") or {}) if native else {}
+        imported_end = (
+            datetime.fromisoformat(meta["valid_until"])
+            if meta.get("valid_until")
+            else None
+        )
+        if imported_end and (end_time is None or imported_end < end_time):
+            end_time, nxt = imported_end, meta.get("superseded_by")
+        elif end_time is None:
+            nxt = meta.get("superseded_by")
+        if end_time and datetime.fromisoformat(now) >= end_time:
+            return None
+        if meta.get("status") == State.SUPERSEDED and not end_time and as_of is None:
+            return None
+        active = (
+            meta.get("status") != State.SUPERSEDED
+            and datetime.fromisoformat(e) <= datetime.now(UTC)
+            and (not end_time or datetime.now(UTC) < end_time)
         )
         return Version(
-            Fact(UUID(i), owner, attribute, t, Source(s), datetime.fromisoformat(e)),
+            Fact(
+                UUID(i),
+                owner,
+                attribute,
+                t,
+                Source(s),
+                datetime.fromisoformat(e),
+                json.loads(native) if native else None,
+            ),
             datetime.fromisoformat(ingest),
             end_time,
             UUID(nxt) if nxt else None,
