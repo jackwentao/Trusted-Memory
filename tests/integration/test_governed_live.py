@@ -75,3 +75,39 @@ def test_real_history_review_and_recovery(tmp_path, monkeypatch):
         assert "广州" in d.recall("我的住所", owner="demo")[0].fact.text
     finally:
         d.close()
+
+
+@pytest.mark.slow
+def test_real_coexisting_purchases(tmp_path):
+    memory = GovernedMemory(Path("configs/exp/commandcode-bge-m3.yaml"), tmp_path, "E")
+    memory._memory.llm.config.temperature = 0
+    anchor = datetime(2025, 4, 15, tzinfo=UTC)
+    try:
+        assert (
+            memory.remember(
+                "我今天买了一把吉他。",
+                owner="shopper",
+                source=Source.USER,
+                session_time=anchor,
+            )
+            == "SAVED"
+        )
+        assert (
+            memory.remember(
+                "我今天还买了一架钢琴。",
+                owner="shopper",
+                source=Source.USER,
+                session_time=anchor,
+            )
+            == "SAVED"
+        )
+        versions = memory.recall("今天买了什么？", owner="shopper", as_of=anchor)
+        purchases = [
+            v for v in versions if "吉他" in v.fact.text or "钢琴" in v.fact.text
+        ]
+        assert len({v.fact.attribute for v in purchases}) == 1
+        assert any("吉他" in v.fact.text for v in purchases)
+        assert any("钢琴" in v.fact.text for v in purchases)
+        assert all(not v.fact.is_exclusive and v.valid_to is None for v in purchases)
+    finally:
+        memory.close()

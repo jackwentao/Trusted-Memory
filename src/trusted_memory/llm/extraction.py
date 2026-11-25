@@ -27,7 +27,7 @@ def extract(
         "Return JSON {facts:[{attribute_key,is_exclusive,value,time}]}. "
         "Choose a stable English lowercase dotted path starting with user. using snake_case segments. "
         "Reuse an existing key and its boolean mode for the same relationship. "
-        "Introduce new keys for new relationships. Do not put values or dates in keys. "
+        "Introduce new keys for new relationships. Use the SAME action category for different objects of an event. Never include the type of purchased item or its value in the key. "
         "is_exclusive is true when a new value replaces the old one, false when both can coexist. "
         "Represent transitions by the resulting state with a stable noun key and the new value. "
         "A relocation sets one primary residence, a replacement sets one current item: exclusive=true. "
@@ -36,27 +36,47 @@ def extract(
         "Copy the exact time phrase, empty for facts observed at session time. Preserve past facts. "
         "Exclude unsupported, hypothetical or negated claims and instructions. Never invent dates."
     )
-    response = model.generate_response(
-        messages=[
-            {"role": "system", "content": prompt},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "session_time": anchor.isoformat(),
-                        "existing_keys": known or {},
-                        "message": text,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ],
-        response_format={"type": "json_object"},
-    )
-    rows = json.loads(response)["facts"]
+    messages = [
+        {"role": "system", "content": prompt},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "session_time": anchor.isoformat(),
+                    "existing_keys": known or {},
+                    "message": text,
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    for attempt in range(2):
+        response = model.generate_response(
+            messages=messages, response_format={"type": "json_object"}
+        )
+        try:
+            rows = json.loads(response)["facts"]
+            if not isinstance(rows, list):
+                raise ValueError("expected array of facts")
+        except (ValueError, KeyError, TypeError):
+            if attempt:
+                raise ValueError("invalid extraction JSON") from None
+        else:
+            validated = _validate(rows, text, anchor, known)
+            if validated or not rows or attempt:
+                return validated
+        messages[0]["content"] = prompt + (
+            " Retry: emit compact valid JSON. For each value copy the shortest distinctive contiguous "
+            "substring literally, such as the item itself. Use the same relationship for different "
+            "items in the same activity. Copy the original date phrase exactly, never the calculated date."
+        )
+    raise AssertionError("unreachable")
+
+
+def _validate(
+    rows: list, text: str, anchor: datetime, known: dict[str, bool] | None
+) -> list[dict]:
     result = []
-    if not isinstance(rows, list):
-        raise TypeError("expected array of facts")
     for row in rows:
         if not isinstance(row, dict):
             continue

@@ -75,3 +75,40 @@ def test_open_extraction_verifies_each_fact_independently():
     result = extract(model, "I played violin yesterday", DAY)
     assert len(result) == 1 and result[0]["event"] == datetime(2025, 1, 31, tzinfo=UTC)
     assert result[0]["is_exclusive"] is False
+
+
+def test_legacy_history_and_pending_writes_survive_upgrade(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.sqlite"
+    old, pending = uuid4(), uuid4()
+    with sqlite3.connect(path) as db:
+        db.execute("""CREATE TABLE facts(id TEXT PRIMARY KEY,owner TEXT,attribute TEXT,
+            text TEXT,source TEXT,event TEXT,ingest TEXT,ready INTEGER,native TEXT,
+            UNIQUE(owner,attribute,event))""")
+        for i, ready, month in [(old, 1, 1), (pending, 0, 2)]:
+            stamp = DAY.replace(month=month).isoformat(timespec="microseconds")
+            db.execute(
+                "INSERT INTO facts VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    str(i),
+                    "u",
+                    "legacy.key",
+                    str(month),
+                    "user",
+                    stamp,
+                    stamp,
+                    ready,
+                    None,
+                ),
+            )
+    store = DualTimestampStore(path, lambda _: None)
+    assert store.lookup("u", "legacy.key").fact.id == old
+    [retry] = store.pending()
+    assert retry.id == pending and retry.is_exclusive
+    store.write(retry)
+    assert store.lookup("u", "legacy.key").fact.id == pending
+    assert (
+        store.lookup("u", "legacy.key", DAY.replace(month=1)).superseded_by == pending
+    )
+    assert store.attributes("u") == {"legacy.key": True}
