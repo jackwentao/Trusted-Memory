@@ -35,14 +35,26 @@ def compare_history(rows, prior):
     old = {key(r): r for r in prior}
     if len(old) != len(rows) or set(old) != {key(r) for r in rows}:
         raise ValueError("baseline and rerun must contain identical questions")
-    lines = ["| 组别 | 上轮历史住所 | 本轮历史住所 |", "|---|---:|---:|"]
+    lines = [
+        "| 组别 | 公开 | 当前住所 | 历史住所 | 安全主问题 | 良性对照 |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
     for arm, name in zip("ABCDE", NAMES, strict=True):
-        hist = [
-            r for r in rows if r["arm"] == arm and r["question"]["kind"] == "historical"
-        ]
-        lines.append(
-            f"| {name} | {ratio([old[key(r)]['correct'] for r in hist])} | {ratio([r['correct'] for r in hist])} |"
-        )
+        cells = []
+        for category in ("public", "current", "historical", "security", "control"):
+
+            def bucket(r):
+                if r["control"]:
+                    return "control"
+                return (
+                    r["question"]["kind"] if r["category"] == "time" else r["category"]
+                )
+
+            subset = [r for r in rows if r["arm"] == arm and bucket(r) == category]
+            cells.append(
+                f"{ratio([old[key(r)]['correct'] for r in subset])} → {ratio([r['correct'] for r in subset])}"
+            )
+        lines.append("| " + " | ".join([name, *cells]) + " |")
     return "\n".join(lines)
 
 
@@ -138,10 +150,17 @@ def report(root, n, split):
         safety.append(
             f"| {name} | {ratio([len(v) == 2 and all(v) for v in paired.values()])} | {decision(source, 'PENDING_REVIEW')} | {decision(directive, 'BLOCKED')} | {exposed} | {decision([r for r in rs if r['control'] and r['subtype'] == 'source'], 'PENDING_REVIEW')} |"
         )
+        if arm in "DE":
+            public = [r for r in rs if r["category"] == "public"]
+            receipts = Counter(receipt for r in public for receipt in r["receipts"])
+            empty = sum(not r["saved"] for r in public)
+            details.append(
+                f"- {arm} 公开对话的写入回执为 {dict(receipts)}；{empty}/{len(public)} 道公开题在回答前没有任何已发布事实。EXTRACTION_REJECTED 合并了抽取验证与写入冲突，仅凭回执不能确定具体原因。"
+            )
         details.append(f"- {arm} 错题自动归因 {dict(labels)}。")
     text = "\n".join(table)
     comparison = ""
-    previous = Path("eval/results/20261125-ABCDE-dev-pilot60-dfdcbb0e")
+    previous = Path("eval/results/20261125-ABCDE-dev-pilot60-f9662142")
     if split == "dev" and n == 60 and not previous.name.endswith(root.name[:8]):
         prior = [
             json.loads(line)
@@ -151,7 +170,7 @@ def report(root, n, split):
             .split("\n")
         ]
         comparison = (
-            "## 同题复测\n\nD/E 本轮把有效时间和版本状态一并传给回答模型。"
+            "## 同题复测\n\n上轮仅抽取三类属性。本轮允许 D/E 自行命名属性并保留可并存事实。"
             "五组均重新生成回答并评分，同题结果可能波动。历史题输入提供查询日期，本轮检验指定日期下的检索与回答。\n\n"
             + compare_history(rows, prior)
             + f"\n\n[上轮逐题结果](results/{previous.name}/judged.jsonl)"
@@ -235,7 +254,7 @@ def report(root, n, split):
 
 回答与评分均为 deepseek/deepseek-v4.1-flash，温度设为 0。B–E 使用 BGE-M3，检索最多 5 条。A 读取全部会话。公开部分抽取 LongMemEval oracle 会话，使用本项目统一评分规则；数值不适用于官方长历史测试。自建题由有限的模板和虚构地点日期生成，跨模板泛化与独立人工复评仍待验证。
 
-D/E 只抽取住所、单位和学校。公开会话按角色拼接送入它们的抽取器；C 使用原始 role/messages。C 对自建消息仅在元数据中保留时间与来源。C→D 混合了抽取范围、时间和上下文表达方式的变化。D/E 向回答模型提供每条事实的生效时间、截止时间与版本状态。E 将外部文档送审，防止虚假更新直接生效，代价是真实外部更新同样需要人工确认。本轮没有人工放行。
+D/E 抽取有原文依据的开放属性。单值变化保留历史，可并存的事实分别保存。不支持的日期表达会导致对应事实被跳过。公开会话按角色拼接送入它们的抽取器；C 使用原始 role/messages。C 对自建消息仅在元数据中保留时间与来源。C→D 混合了抽取范围、时间和上下文表达方式的变化。D/E 向回答模型提供每条事实的生效时间、截止时间与版本状态。E 将外部文档送审，防止虚假更新直接生效，代价是真实外部更新同样需要人工确认。本轮没有人工放行。
 
 ## 成对时间题与安全代价
 
