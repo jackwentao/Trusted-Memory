@@ -151,3 +151,52 @@ def test_invalid_json_is_not_retried():
     with pytest.raises(ValueError, match="invalid extraction JSON"):
         extract(model, "Hello", DAY)
     model.generate_response.assert_called_once()
+
+
+def test_snapshot_scope_and_exact_legacy_reuse(tmp_path):
+    store = DualTimestampStore(tmp_path / "snapshot.db", lambda _: None)
+    first = Fact(uuid4(), "a", "legacy.home", "legacy.home 北京", Source.USER, DAY)
+    latest = replace(
+        first, id=uuid4(), text="legacy.home 上海", event_time=DAY.replace(month=3)
+    )
+    for fact in (
+        first,
+        latest,
+        replace(first, id=uuid4(), owner="b"),
+        replace(first, id=uuid4(), attribute="user.pet", is_exclusive=False),
+    ):
+        store.write(fact)
+    snapshot = store.active_exclusive_snapshot("a")
+    assert snapshot == {"legacy.home": "上海"}
+    model = Mock()
+    model.generate_response.return_value = json.dumps(
+        {
+            "facts": [
+                {
+                    "attribute_key": key,
+                    "value": val,
+                    "is_exclusive": True,
+                    "event_time": "2025-04-01",
+                }
+                for key, val in [("legacy.home", "广州"), ("profile.hometown", "上海")]
+            ]
+        }
+    )
+    result = extract(model, "我搬到了广州，老家在上海", DAY.replace(month=5), snapshot)
+    messages = model.generate_response.call_args.kwargs["messages"]
+    assert json.loads(messages[1]["content"])["active_exclusive_snapshot"] == snapshot
+    for r in result:
+        store.write(
+            replace(
+                first,
+                id=uuid4(),
+                attribute=r["attribute"],
+                text=r["value"],
+                event_time=r["event"],
+                is_exclusive=r["is_exclusive"],
+            )
+        )
+    assert store.active_exclusive_snapshot("a") == {
+        "legacy.home": "广州",
+        "profile.hometown": "上海",
+    }

@@ -51,6 +51,14 @@ class DualTimestampStore:
                 (PARTITION BY owner,attribute ORDER BY event,id)""")
             db.commit()
 
+    def active_exclusive_snapshot(self, owner: str) -> dict[str, str]:
+        """Return this owner's currently published single-value facts."""
+        return {
+            v.fact.attribute: v.fact.text.removeprefix(v.fact.attribute + " ")
+            for v in self.effective(owner)
+            if v.fact.is_exclusive and v.state == State.ACTIVE
+        }
+
     def attributes(self, owner: str) -> dict[str, bool]:
         """Return the observed vocabulary for this owner alone."""
         with closing(sqlite3.connect(self.path)) as db:
