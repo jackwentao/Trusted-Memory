@@ -78,9 +78,7 @@ class GovernedMemory:
         return self._publish(text, owner, source, session_time)
 
     def _publish(self, text: str, owner: str, source: Source, anchor: datetime) -> str:
-        rows = extract(
-            self._memory.llm, text, anchor, self._store.active_exclusive_snapshot(owner)
-        )
+        rows = extract(self._memory.llm, text, anchor)
         for row in rows:
             key = uuid5(
                 NAMESPACE_URL,

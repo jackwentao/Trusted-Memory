@@ -153,50 +153,38 @@ def test_invalid_json_is_not_retried():
     model.generate_response.assert_called_once()
 
 
-def test_snapshot_scope_and_exact_legacy_reuse(tmp_path):
-    store = DualTimestampStore(tmp_path / "snapshot.db", lambda _: None)
-    first = Fact(uuid4(), "a", "legacy.home", "legacy.home 北京", Source.USER, DAY)
-    latest = replace(
-        first, id=uuid4(), text="legacy.home 上海", event_time=DAY.replace(month=3)
-    )
-    for fact in (
-        first,
-        latest,
-        replace(first, id=uuid4(), owner="b"),
-        replace(first, id=uuid4(), attribute="user.pet", is_exclusive=False),
-    ):
-        store.write(fact)
-    snapshot = store.active_exclusive_snapshot("a")
-    assert snapshot == {"legacy.home": "上海"}
+@pytest.mark.parametrize(
+    "key",
+    [
+        "profile.residence",
+        "profile.employer",
+        "profile.school",
+        "profile.phone",
+        "profile.role",
+        "profile.hometown",
+        "profile.work_phone",
+        "user.pet",
+        "user.purchase",
+        "user.event",
+    ],
+)
+def test_only_five_keys_can_replace(key):
     model = Mock()
     model.generate_response.return_value = json.dumps(
-        {
-            "facts": [
-                {
-                    "attribute_key": key,
-                    "value": val,
-                    "is_exclusive": True,
-                    "event_time": "2025-04-01",
-                }
-                for key, val in [("legacy.home", "广州"), ("profile.hometown", "上海")]
-            ]
+        {"facts": [{"attribute_key": key, "is_exclusive": True, "value": "new value"}]}
+    )
+    [fact] = extract(model, "different wording", DAY)
+    assert fact["is_exclusive"] == (
+        key
+        in {
+            "profile.residence",
+            "profile.employer",
+            "profile.school",
+            "profile.phone",
+            "profile.role",
         }
     )
-    result = extract(model, "我搬到了广州，老家在上海", DAY.replace(month=5), snapshot)
-    messages = model.generate_response.call_args.kwargs["messages"]
-    assert json.loads(messages[1]["content"])["active_exclusive_snapshot"] == snapshot
-    for r in result:
-        store.write(
-            replace(
-                first,
-                id=uuid4(),
-                attribute=r["attribute"],
-                text=r["value"],
-                event_time=r["event"],
-                is_exclusive=r["is_exclusive"],
-            )
-        )
-    assert store.active_exclusive_snapshot("a") == {
-        "legacy.home": "广州",
-        "profile.hometown": "上海",
-    }
+    payload = json.loads(
+        model.generate_response.call_args.kwargs["messages"][1]["content"]
+    )
+    assert set(payload) == {"message", "session_time"}

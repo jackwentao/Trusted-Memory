@@ -111,35 +111,3 @@ def test_real_coexisting_purchases(tmp_path):
         assert all(not v.fact.is_exclusive and v.valid_to is None for v in purchases)
     finally:
         memory.close()
-
-
-@pytest.mark.slow
-def test_real_qualified_profile_keys(tmp_path):
-    memory = GovernedMemory(Path("configs/exp/commandcode-bge-m3.yaml"), tmp_path, "E")
-    try:
-        for day, text in enumerate(
-            [
-                "我现在住在北京，个人主用电话的分机号是 1234。",
-                "我的老家是北京，我的工作电话分机号是 5678。",
-                "我现在搬到上海，个人主用电话的分机号改为 9012。",
-            ],
-            1,
-        ):
-            assert (
-                memory.remember(
-                    text,
-                    owner="scope",
-                    source=Source.USER,
-                    session_time=datetime(2025, 4, day, tzinfo=UTC),
-                )
-                == "SAVED"
-            )
-        facts = memory._store.active_exclusive_snapshot("scope")
-        assert (
-            "上海" in facts["profile.residence"] and "北京" in facts["profile.hometown"]
-        )
-        assert any("work" in k and "5678" in v for k, v in facts.items())
-        assert any("work" not in k and "9012" in v for k, v in facts.items())
-        assert all("1234" not in v for v in facts.values())
-    finally:
-        memory.close()
