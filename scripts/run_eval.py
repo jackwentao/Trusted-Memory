@@ -236,20 +236,23 @@ class Runtime:
                 if not correct and not answer.strip():
                     attribution = "reader_empty"
                 elif not correct:
-                    label = json.loads(
-                        chat(
-                            self.llm,
-                            "Diagnose one failed memory QA. Return JSON with label: missing (necessary evidence absent from saved facts), retrieval (present in saved facts but absent from context), reasoning (evidence in context but answer misused it), or judge_review (answer appears correct).",
-                            {
-                                "question": q,
-                                "answer": answer,
-                                "saved": saved,
-                                "context": ctx,
-                            },
-                            True,
+                    try:
+                        label = json.loads(
+                            chat(
+                                self.llm,
+                                "Diagnose one failed memory QA. Return JSON with label: missing (necessary evidence absent from saved facts), retrieval (present in saved facts but absent from context), reasoning (evidence in context but answer misused it), or judge_review (answer appears correct).",
+                                {
+                                    "question": q,
+                                    "answer": answer,
+                                    "saved": saved,
+                                    "context": ctx,
+                                },
+                                True,
+                            )
                         )
-                    )
-                    attribution = label["label"]
+                        attribution = label["label"]
+                    except (json.JSONDecodeError, KeyError):
+                        attribution = "diagnosis_unavailable"
                 records.append(
                     {
                         "id": r["id"],
