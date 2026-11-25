@@ -53,28 +53,59 @@ def test_open_history(tmp_path, key, exclusive):
         store.write(replace(first, id=uuid4(), is_exclusive=not exclusive))
 
 
-def test_open_extraction_verifies_each_fact_independently():
-    fact = {
-        "attribute_key": "user.music.instrument",
-        "is_exclusive": False,
-        "value": "violin",
-        "time": "yesterday",
-    }
+@pytest.mark.parametrize(
+    ("date", "expected", "precision"),
+    [
+        ("2025-01", DAY.replace(month=1), "month"),
+        ("2025-01-31", DAY.replace(month=1, day=31), "day"),
+        (None, DAY, "observation"),
+        ("2025-02-30", DAY, "observation"),
+        ("2030-01", DAY, "observation"),
+        ([], DAY, "observation"),
+    ],
+)
+def test_paraphrase_and_date_guard(date, expected, precision):
     model = Mock()
     model.generate_response.return_value = json.dumps(
         {
             "facts": [
-                fact,
-                dict(fact, value="piano"),
-                dict(fact, is_exclusive="false"),
-                dict(fact, time="tomorrow"),
-                dict(fact, attribute_key="bad key"),
+                {
+                    "attribute_key": "user.purchase",
+                    "value": "acquired a guitar",
+                    "event_time": date,
+                    "is_exclusive": True,
+                },
+                {"attribute_key": "bad path", "value": "bad"},
             ]
         }
     )
-    result = extract(model, "I played violin yesterday", DAY)
-    assert len(result) == 1 and result[0]["event"] == datetime(2025, 1, 31, tzinfo=UTC)
-    assert result[0]["is_exclusive"] is False
+    [fact] = extract(model, "I bought an instrument.", DAY)
+    assert (fact["value"], fact["event"], fact["precision"], fact["is_exclusive"]) == (
+        "acquired a guitar",
+        expected,
+        precision,
+        False,
+    )
+    model.generate_response.assert_called_once()
+
+
+def test_profile_requires_explicit_boolean_true():
+    model = Mock()
+    model.generate_response.return_value = json.dumps(
+        {
+            "facts": [
+                {
+                    "attribute_key": "profile.residence",
+                    "value": "Paris",
+                    "is_exclusive": mode,
+                }
+                for mode in [True, False, "true", None]
+            ]
+        }
+    )
+    records = extract(model, "I moved to Paris", DAY)
+    assert [r["is_exclusive"] for r in records] == [True, False, False, False]
+    assert records[0]["attribute"] == "profile.residence"
 
 
 def test_legacy_history_and_pending_writes_survive_upgrade(tmp_path):
@@ -114,18 +145,9 @@ def test_legacy_history_and_pending_writes_survive_upgrade(tmp_path):
     assert store.attributes("u") == {"legacy.key": True}
 
 
-def test_bad_evidence_retried_once_and_still_grounded():
-    fact = {
-        "attribute_key": "user.instrument",
-        "is_exclusive": False,
-        "value": "banjo",
-        "time": "",
-    }
+def test_invalid_json_is_not_retried():
     model = Mock()
-    bad = json.dumps({"facts": [fact]})
-    good = json.dumps({"facts": [dict(fact, value="lute")]})
-    model.generate_response.side_effect = [bad, good, bad, bad]
-    [saved] = extract(model, "I play lute", DAY)
-    assert saved["value"] == "lute"
-    assert extract(model, "I play lute", DAY) == []
-    assert model.generate_response.call_count == 4
+    model.generate_response.return_value = "{"
+    with pytest.raises(ValueError, match="invalid extraction JSON"):
+        extract(model, "Hello", DAY)
+    model.generate_response.assert_called_once()
