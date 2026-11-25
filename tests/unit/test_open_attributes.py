@@ -1,13 +1,14 @@
 import json
 from dataclasses import replace
 from datetime import UTC, datetime
-from uuid import uuid4
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
-from trusted_memory.schemas import Fact, Source, State
-from trusted_memory.memory.dual_timestamp_store import DualTimestampStore
+
 from trusted_memory.llm.extraction import extract
+from trusted_memory.memory.dual_timestamp_store import DualTimestampStore
+from trusted_memory.schemas import Fact, Source, State
 
 DAY = datetime(2025, 2, 1, tzinfo=UTC)
 
