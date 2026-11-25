@@ -24,25 +24,43 @@ class DualTimestampStore:
         self.path = path
         self.upsert = upsert
         with closing(sqlite3.connect(path)) as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS facts(
-                    id TEXT PRIMARY KEY, owner TEXT NOT NULL, attribute TEXT NOT NULL,
-                    text TEXT NOT NULL, source TEXT NOT NULL, event TEXT NOT NULL,
-                    ingest TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
-                    UNIQUE(owner,attribute,event)
-                );
-                CREATE VIEW IF NOT EXISTS chain AS SELECT *,
-                    lead(event) OVER timeline AS valid_to,
-                    lead(id) OVER timeline AS successor
-                    FROM facts WHERE ready=1
-                    WINDOW timeline AS (PARTITION BY owner,attribute ORDER BY event);
-            """)
-
-            # Additive migration preserves existing facts and interrupted writes.
             db.execute("BEGIN IMMEDIATE")
-            if "native" not in {r[1] for r in db.execute("PRAGMA table_info(facts)")}:
-                db.execute("ALTER TABLE facts ADD COLUMN native TEXT")
+            cols = {r[1] for r in db.execute("PRAGMA table_info(facts)")}
+            if cols and "is_exclusive" not in cols:
+                db.execute("DROP VIEW IF EXISTS chain")
+                db.execute("ALTER TABLE facts RENAME TO facts_legacy")
+            db.execute("""CREATE TABLE IF NOT EXISTS facts(
+                id TEXT PRIMARY KEY, owner TEXT NOT NULL, attribute TEXT NOT NULL,
+                text TEXT NOT NULL, source TEXT NOT NULL, event TEXT NOT NULL,
+                ingest TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
+                native TEXT, is_exclusive INTEGER NOT NULL CHECK(is_exclusive IN (0,1)))""")
+            if cols and "is_exclusive" not in cols:
+                native = "native" if "native" in cols else "NULL"
+                db.execute(f"""INSERT INTO facts SELECT id,owner,attribute,text,source,event,
+                           ingest,ready,{native},1 FROM facts_legacy""")
+                db.execute("DROP TABLE facts_legacy")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS owner_key ON facts(owner, attribute)"
+            )
+            db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS exclusive_event
+                       ON facts(owner, attribute,event) WHERE is_exclusive=1""")
+            db.execute("""CREATE VIEW IF NOT EXISTS chain AS SELECT *,
+                CASE WHEN is_exclusive THEN lead(event) OVER timeline END AS valid_to,
+                CASE WHEN is_exclusive THEN lead(id) OVER timeline END AS successor
+                FROM facts WHERE ready=1 WINDOW timeline AS
+                (PARTITION BY owner,attribute ORDER BY event,id)""")
             db.commit()
+
+    def attributes(self, owner: str) -> dict[str, bool]:
+        """Return the observed vocabulary for this owner alone."""
+        with closing(sqlite3.connect(self.path)) as db:
+            return {
+                key: bool(mode)
+                for key, mode in db.execute(
+                    "SELECT DISTINCT attribute,is_exclusive FROM facts WHERE owner=? AND ready=1",
+                    (owner,),
+                )
+            }
 
     def write(self, fact: Fact) -> None:
         """Persist intent, then publish. Retrying the same fact resumes after failure."""
@@ -56,15 +74,22 @@ class DualTimestampStore:
             json.dumps(fact.native, sort_keys=True, allow_nan=False)
             if fact.native is not None
             else None,
+            int(fact.is_exclusive),
         )
         with closing(sqlite3.connect(self.path)) as db:
             with db:
+                db.execute("BEGIN IMMEDIATE")
+                if db.execute(
+                    "SELECT 1 FROM facts WHERE owner=? AND attribute=? AND is_exclusive!=? LIMIT 1",
+                    (fact.owner, fact.attribute, int(fact.is_exclusive)),
+                ).fetchone():
+                    raise ValueError("attribute cardinality conflict")
                 db.execute(
-                    "INSERT INTO facts(id,owner,attribute,text,source,event,native,ingest) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
+                    "INSERT INTO facts(id,owner,attribute,text,source,event,native,is_exclusive,ingest) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING",
                     (key, *values, _stamp(datetime.now(UTC))),
                 )
                 current = db.execute(
-                    "SELECT owner,attribute,text,source,event,native,ready FROM facts WHERE id=?",
+                    "SELECT owner,attribute,text,source,event,native,is_exclusive,ready FROM facts WHERE id=?",
                     (key,),
                 ).fetchone()
                 if current[:-1] != values:
@@ -87,9 +112,10 @@ class DualTimestampStore:
                     Source(s),
                     datetime.fromisoformat(e),
                     json.loads(native) if native else None,
+                    bool(mode),
                 )
-                for i, o, a, t, s, e, native in db.execute(
-                    "SELECT id,owner,attribute,text,source,event,native FROM facts WHERE ready=0"
+                for i, o, a, t, s, e, native, mode in db.execute(
+                    "SELECT id,owner,attribute,text,source,event,native,is_exclusive FROM facts WHERE ready=0"
                 )
             ]
 
@@ -97,15 +123,32 @@ class DualTimestampStore:
         self, owner: str, attribute: str, as_of: datetime | None = None
     ) -> Version | None:
         """Select the version effective at a point in time, defaulting to now."""
+        versions = self.effective(owner, as_of, attribute)
+        if len(versions) > 1:
+            raise ValueError("multiple effective values; use effective()")
+        return versions[0] if versions else None
+
+    def effective(
+        self, owner: str, as_of: datetime | None = None, attribute: str | None = None
+    ) -> list[Version]:
+        """Read all eligible values, including concurrent observations of the same key."""
         now = _stamp(as_of or datetime.now(UTC))
+        sql = """SELECT id,owner,attribute,text,source,event,ingest,valid_to,successor,native,is_exclusive
+                 FROM chain WHERE owner=? AND event<=? AND (valid_to IS NULL OR valid_to>?)"""
+        params = [owner, now, now]
+        if attribute is not None:
+            sql += " AND attribute=?"
+            params.append(attribute)
         with closing(sqlite3.connect(self.path)) as db:
-            row = db.execute(
-                "SELECT id,text,source,event,ingest,valid_to,successor,native FROM chain WHERE owner=? AND attribute=? AND event<=? AND (valid_to IS NULL OR valid_to>?)",
-                (owner, attribute, now, now),
-            ).fetchone()
-        if row is None:
-            return None
-        i, t, s, e, ingest, end, nxt, native = row
+            return [
+                v
+                for row in db.execute(sql, params)
+                if (v := self._version(row, now, as_of)) is not None
+            ]
+
+    @staticmethod
+    def _version(row: tuple, now: str, as_of: datetime | None) -> Version | None:
+        i, owner, attribute, t, s, e, ingest, end, nxt, native, mode = row
         end_time = datetime.fromisoformat(end) if end else None
         meta = (json.loads(native).get("metadata") or {}) if native else {}
         imported_end = (
@@ -135,6 +178,7 @@ class DualTimestampStore:
                 Source(s),
                 datetime.fromisoformat(e),
                 json.loads(native) if native else None,
+                bool(mode),
             ),
             datetime.fromisoformat(ingest),
             end_time,

@@ -54,6 +54,12 @@ class Fact:
     event_time: datetime
     native: dict[str, Any] | None = None
 
+    is_exclusive: bool = True
+
+    def __post_init__(self) -> None:
+        if type(self.is_exclusive) is not bool:
+            raise ValueError("is_exclusive must be boolean")
+
     @classmethod
     def from_mem0_payload(
         cls,
@@ -100,11 +106,15 @@ class Fact:
         return cls(
             identifier,
             scope,
-            attribute or meta.get("attribute") or str(identifier),
+            attribute
+            or meta.get("attribute_key")
+            or meta.get("attribute")
+            or str(identifier),
             native["memory"],
             Source(provenance),
             event,
             native,
+            meta.get("is_exclusive", True),
         )
 
     def to_mem0_payload(self) -> dict[str, Any]:
@@ -119,6 +129,8 @@ class Fact:
             event_time=self.event_time.isoformat(),
             source_type=self.source.value,
             attribute=self.attribute,
+            attribute_key=self.attribute,
+            is_exclusive=self.is_exclusive,
             owner=self.owner,
         )
         meta.setdefault("status", State.ACTIVE.value)

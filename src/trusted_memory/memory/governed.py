@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from mem0 import Memory
 from qdrant_client.models import Filter, HasIdCondition
 
-from trusted_memory.llm.extraction import ATTRIBUTES, extract
+from trusted_memory.llm.extraction import extract
 from trusted_memory.memory.dual_timestamp_store import DualTimestampStore
 from trusted_memory.schemas import Fact, Source, Version
 from trusted_memory.security.middleware import JsonAuditLog, SecurityMiddleware
@@ -77,7 +78,7 @@ class GovernedMemory:
         return self._publish(text, owner, source, session_time)
 
     def _publish(self, text: str, owner: str, source: Source, anchor: datetime) -> str:
-        rows = extract(self._memory.llm, text, anchor)
+        rows = extract(self._memory.llm, text, anchor, self._store.attributes(owner))
         for row in rows:
             key = uuid5(
                 NAMESPACE_URL,
@@ -105,8 +106,19 @@ class GovernedMemory:
                         "precision": row["precision"],
                         "time_expression": row["phrase"],
                         "evidence": text,
+                        "security_screened": self._gate is not None,
+                        "redaction_placeholders": sorted(
+                            set(
+                                re.findall(
+                                    r"<(?:PHONE|ID_CARD|BANK_CARD|SECRET)>", text
+                                )
+                            )
+                        )
+                        if self._gate
+                        else [],
                     },
                 },
+                row["is_exclusive"],
             )
             self._store.write(fact)
         return "SAVED" if rows else "NO_FACT"
@@ -142,11 +154,7 @@ class GovernedMemory:
     ) -> list[Version]:
         """Filter by owner and effective interval before ranking eligible points."""
         instant = as_of or datetime.now(UTC)
-        versions = {
-            str(v.fact.id): v
-            for attr in ATTRIBUTES
-            if (v := self._store.lookup(owner, attr, instant))
-        }
+        versions = {str(v.fact.id): v for v in self._store.effective(owner, as_of)}
         # A month-level transition has no known exact day inside that month.
         versions = {
             key: version
