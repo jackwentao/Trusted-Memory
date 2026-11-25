@@ -57,7 +57,7 @@ def extract(
         try:
             rows = json.loads(response)["facts"]
             if not isinstance(rows, list):
-                raise ValueError("expected array of facts")
+                raise TypeError("expected array of facts")
         except (ValueError, KeyError, TypeError):
             if attempt:
                 raise ValueError("invalid extraction JSON") from None

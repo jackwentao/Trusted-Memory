@@ -112,3 +112,20 @@ def test_legacy_history_and_pending_writes_survive_upgrade(tmp_path):
         store.lookup("u", "legacy.key", DAY.replace(month=1)).superseded_by == pending
     )
     assert store.attributes("u") == {"legacy.key": True}
+
+
+def test_bad_evidence_retried_once_and_still_grounded():
+    fact = {
+        "attribute_key": "user.instrument",
+        "is_exclusive": False,
+        "value": "banjo",
+        "time": "",
+    }
+    model = Mock()
+    bad = json.dumps({"facts": [fact]})
+    good = json.dumps({"facts": [dict(fact, value="lute")]})
+    model.generate_response.side_effect = [bad, good, bad, bad]
+    [saved] = extract(model, "I play lute", DAY)
+    assert saved["value"] == "lute"
+    assert extract(model, "I play lute", DAY) == []
+    assert model.generate_response.call_count == 4
