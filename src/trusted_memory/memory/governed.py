@@ -51,8 +51,41 @@ class GovernedMemory:
             [embedding], payloads=[payload], ids=[str(fact.id)]
         )
 
+    def remember_dialogue(
+        self, messages: list[dict], *, owner: str, session_time: datetime
+    ) -> list[str]:
+        """Separate trusted speaker roles before extracting personal updates."""
+        if any(m["role"] not in ("user", "assistant") for m in messages):
+            raise ValueError("unexpected dialogue role")
+        receipts = []
+        for speaker in ("user", "assistant"):
+            selected = [m for m in messages if m["role"] == speaker]
+            if not selected:
+                continue
+            body = (
+                json.dumps(messages, ensure_ascii=False)
+                if speaker == "assistant"
+                else "\n".join(m["content"] for m in selected)
+            )
+            receipts.append(
+                self.remember(
+                    body,
+                    owner=owner,
+                    source=Source.USER,
+                    session_time=session_time,
+                    assistant=speaker == "assistant",
+                )
+            )
+        return receipts
+
     def remember(
-        self, text: str, *, owner: str, source: Source, session_time: datetime
+        self,
+        text: str,
+        *,
+        owner: str,
+        source: Source,
+        session_time: datetime,
+        assistant: bool = False,
     ) -> str:
         """Return the disposition; review receipts include the candidate identifier."""
         if not owner or session_time.utcoffset() is None:
@@ -75,10 +108,23 @@ class GovernedMemory:
             if decision.approved_text is None:
                 return "BLOCKED"
             text = decision.approved_text
-        return self._publish(text, owner, source, session_time)
+        return self._publish(text, owner, source, session_time, assistant=assistant)
 
-    def _publish(self, text: str, owner: str, source: Source, anchor: datetime) -> str:
-        rows = extract(self._memory.llm, text, anchor)
+    def _publish(
+        self,
+        text: str,
+        owner: str,
+        source: Source,
+        anchor: datetime,
+        *,
+        assistant: bool = False,
+    ) -> str:
+        speaker = (
+            ("assistant" if assistant else "user")
+            if source == Source.USER
+            else source.value
+        )
+        rows = extract(self._memory.llm, text, anchor, assistant=assistant)
         for row in rows:
             key = uuid5(
                 NAMESPACE_URL,
@@ -96,7 +142,7 @@ class GovernedMemory:
                 key,
                 owner,
                 row["attribute"],
-                row["attribute"] + " " + row["value"],
+                f"[{speaker}] {row['attribute']} {row['value']}",
                 source,
                 row["event"],
                 {
@@ -104,6 +150,7 @@ class GovernedMemory:
                     "metadata": {
                         "session_time": anchor.isoformat(),
                         "precision": row["precision"],
+                        "speaker": speaker,
                         "time_expression": row["phrase"],
                         "evidence": text,
                         "security_screened": self._gate is not None,

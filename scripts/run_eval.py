@@ -17,6 +17,7 @@ from uuid import uuid4
 import numpy as np
 import torch
 from build_eval_dataset import public_data
+from eval_report import TOP_K
 
 os.environ.setdefault("MEM0_TELEMETRY", "false")
 from mem0 import Memory
@@ -145,6 +146,16 @@ class Runtime:
                     )
                 elif arm in self.g:
                     try:
+                        if "messages" in t:
+                            outcomes = self.g[arm].remember_dialogue(
+                                t["messages"],
+                                owner=owner,
+                                session_time=datetime.fromisoformat(t["date"]).replace(
+                                    tzinfo=UTC
+                                ),
+                            )
+                            receipts.extend(x.split(":")[0] for x in outcomes)
+                            continue
                         disposition = self.g[arm].remember(
                             t["text"],
                             owner=owner,
@@ -178,12 +189,12 @@ class Runtime:
                     ranks = (vec @ query) / (
                         np.linalg.norm(vec, axis=1) * np.linalg.norm(query) + 1e-12
                     )
-                    ctx = [evidence[i] for i in np.argsort(-ranks)[:5]]
+                    ctx = [evidence[i] for i in np.argsort(-ranks)[:TOP_K]]
                 elif arm == "C":
                     ctx = [
                         x["memory"]
                         for x in self.c.search(
-                            q["text"], filters={"user_id": owner}, top_k=5
+                            q["text"], filters={"user_id": owner}, top_k=TOP_K
                         )["results"]
                     ]
                 else:
@@ -195,7 +206,7 @@ class Runtime:
                     ctx = [
                         v.reader_context()
                         for v in self.g[arm].recall(
-                            q["text"], owner=owner, as_of=instant, k=5
+                            q["text"], owner=owner, as_of=instant, k=TOP_K
                         )
                     ]
                 retrieval = (time.perf_counter() - start) * 1000

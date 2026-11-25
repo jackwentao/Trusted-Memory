@@ -6,6 +6,7 @@ import math
 from collections import Counter
 from pathlib import Path
 
+TOP_K = 15
 NAMES = ("Full-Context", "Naive-RAG", "Raw-Mem0", "Mem0+Temporal", "Trusted-Memory")
 
 
@@ -160,7 +161,7 @@ def report(root, n, split):
         details.append(f"- {arm} 错题自动归因 {dict(labels)}。")
     text = "\n".join(table)
     comparison = ""
-    previous = Path("eval/results/20261125-ABCDE-dev-pilot60-3c385631")
+    previous = Path("eval/results/20261125-ABCDE-dev-pilot60-09368476")
     if split == "dev" and n == 60 and not previous.name.endswith(root.name[:8]):
         prior = [
             json.loads(line)
@@ -170,7 +171,7 @@ def report(root, n, split):
             .split("\n")
         ]
         comparison = (
-            "## 同题复测\n\n上轮要求逐字匹配并允许重试。本轮 D/E 每次写入仅调用一次抽取模型，允许归纳，默认保留并存事实。"
+            "## 同题复测\n\n上轮最多检索 5 条，本轮 B–E 最多检索 15 条。D/E 同时新增助手事实，前后差值反映两项改动的合计效果。"
             "五组均重新生成回答并评分，同题结果可能波动。历史题输入提供查询日期，本轮检验指定日期下的检索与回答。\n\n"
             + compare_history(rows, prior)
             + f"\n\n[上轮逐题结果](results/{previous.name}/judged.jsonl)"
@@ -208,7 +209,7 @@ def report(root, n, split):
             "split": split,
             "scenarios": n,
             "seed": 20261125,
-            "top_k": 5,
+            "top_k": TOP_K,
             "reader_and_judge": "deepseek/deepseek-v4.1-flash",
             "temperature": 0,
             "embedding": "BAAI/bge-m3",
@@ -252,9 +253,9 @@ def report(root, n, split):
 
 ¹ 当前住所仅指时间演化组。安全主问题混合来源、指令和隐私场景，答对率与防火墙拦截率分别记录。² 含成功请求返回的写入、回答、评分及错题归因用量。各阶段分项与检索 P50/P95 见 [summary.json](results/{out.name}/summary.json)。无核实的网关结算单价，未填实际金额。中断重试的额外用量未计入表内。延迟包含同机并发竞争。
 
-回答与评分均为 deepseek/deepseek-v4.1-flash，温度设为 0。B–E 使用 BGE-M3，检索最多 5 条。A 读取全部会话。公开部分抽取 LongMemEval oracle 会话，使用本项目统一评分规则；数值不适用于官方长历史测试。自建题由有限的模板和虚构地点日期生成，跨模板泛化与独立人工复评仍待验证。
+回答与评分均为 deepseek/deepseek-v4.1-flash，温度设为 0。B–E 使用 BGE-M3，检索最多 {TOP_K} 条。A 读取全部会话。公开部分抽取 LongMemEval oracle 会话，使用本项目统一评分规则；数值不适用于官方长历史测试。自建题由有限的模板和虚构地点日期生成，跨模板泛化与独立人工复评仍待验证。
 
-D/E 仅对现居地、当前公司、在读学校、主用手机号和当前职位维护版本链，其他事实分别保存。抽取无需预查历史键名。模型按会话日期推断事实日期。仅知月份时保留月级精度，日期缺失、无效或晚于会话时回退到会话时间。公开会话按角色拼接送入它们的抽取器；C 使用原始 role/messages。C 对自建消息仅在元数据中保留时间与来源。C→D 混合了抽取范围、时间和上下文表达方式的变化。D/E 向回答模型提供每条事实的生效时间、截止时间与版本状态。E 将外部文档送审，防止虚假更新直接生效，代价是真实外部更新同样需要人工确认。本轮没有人工放行。
+D/E 仅对现居地、当前公司、在读学校、主用手机号和当前职位维护版本链，其他事实分别保存。抽取无需预查历史键名。模型按会话日期推断事实日期。仅知月份时保留月级精度，日期缺失、无效或晚于会话时回退到会话时间。公开会话分两次抽取。用户档案抽取只读用户发言，助手事实抽取可读完整对话以理解上下文。助手事实单独标记且一律追加；C 使用原始 role/messages。C 对自建消息仅在元数据中保留时间与来源。C→D 混合了抽取范围、时间和上下文表达方式的变化。D/E 向回答模型提供每条事实的生效时间、截止时间与版本状态。E 将外部文档送审，防止虚假更新直接生效，代价是真实外部更新同样需要人工确认。本轮没有人工放行。
 
 ## 成对时间题与安全代价
 
@@ -262,7 +263,7 @@ D/E 仅对现居地、当前公司、在读学校、主用手机号和当前职�
 |---|---:|---:|---:|---:|---:|
 {chr(10).join(safety)}
 
-安全列按最后一次写入的实际回执计数。A–D 没有 E 的防火墙。虚构电话一列检查保存事实、检索上下文及回答中的原值，分母为隐私场景数；没有提取电话也可减少暴露，不能单凭该列推断主动脱敏。提供外部资料时自建场景带有“未核实”的文字提示。原文检索按整段会话取前五条，短场景下往往能看到全部历史。
+安全列按最后一次写入的实际回执计数。A–D 没有 E 的防火墙。虚构电话一列检查保存事实、检索上下文及回答中的原值，分母为隐私场景数；没有提取电话也可减少暴露，不能单凭该列推断主动脱敏。提供外部资料时自建场景带有“未核实”的文字提示。原文检索按整段会话取前 {TOP_K} 条，短场景下往往能看到全部历史。
 
 ## 失败归因
 

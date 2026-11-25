@@ -188,3 +188,42 @@ def test_only_five_keys_can_replace(key):
         model.generate_response.call_args.kwargs["messages"][1]["content"]
     )
     assert set(payload) == {"message", "session_time"}
+
+
+def test_assistant_cannot_replace_user_even_if_model_requests_it(tmp_path):
+    from trusted_memory.memory.governed import GovernedMemory
+
+    arm = GovernedMemory.__new__(GovernedMemory)
+    arm._gate = None
+    arm._memory = Mock()
+    arm._store = DualTimestampStore(tmp_path / "facts", lambda _: None)
+    model = arm._memory.llm.generate_response
+    model.side_effect = [
+        json.dumps(
+            {
+                "facts": [
+                    {
+                        "attribute_key": "profile.residence",
+                        "value": city,
+                        "is_exclusive": True,
+                    }
+                ]
+            }
+        )
+        for city in ("Paris", "Rome")
+    ]
+    receipts = arm.remember_dialogue(
+        [
+            {"role": "user", "content": "I live in Paris."},
+            {"role": "assistant", "content": "Try Rome."},
+        ],
+        owner="u",
+        session_time=DAY,
+    )
+    assert receipts == ["SAVED", "SAVED"]
+    assert "Rome" not in model.call_args_list[0].kwargs["messages"][1]["content"]
+    facts = {v.fact.attribute: v.fact for v in arm._store.effective("u")}
+    assert facts["profile.residence"].is_exclusive
+    assistant = facts["assistant.residence"]
+    assert assistant.source == Source.USER and not assistant.is_exclusive
+    assert assistant.native["metadata"]["speaker"] == "assistant"
